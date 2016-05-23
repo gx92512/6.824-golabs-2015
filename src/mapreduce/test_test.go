@@ -129,7 +129,7 @@ func setup() *MapReduce {
 }
 
 func cleanup(mr *MapReduce) {
-	mr.CleanupFiles()
+	mr.cleanupFiles()
 	RemoveFile(mr.file)
 }
 

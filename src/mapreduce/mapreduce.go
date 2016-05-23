@@ -64,6 +64,8 @@ type MapReduce struct {
 	Workers map[string]*WorkerInfo
 
 	// add any additional state here
+    freeChannel chan string
+    doneChannel chan int
 }
 
 func InitMapReduce(nmap int, nreduce int,
@@ -78,14 +80,17 @@ func InitMapReduce(nmap int, nreduce int,
 	mr.DoneChannel = make(chan bool)
 
 	// initialize any additional state here
+    mr.Workers = make(map[string]*WorkerInfo)
+    mr.freeChannel = make(chan string, 100)
+    mr.doneChannel = make(chan int)
 	return mr
 }
 
 func MakeMapReduce(nmap int, nreduce int,
 	file string, master string) *MapReduce {
 	mr := InitMapReduce(nmap, nreduce, file, master)
-	mr.StartRegistrationServer()
-	go mr.Run()
+	mr.startRegistrationServer()
+	go mr.run()
 	return mr
 }
 
@@ -103,7 +108,7 @@ func (mr *MapReduce) Shutdown(args *ShutdownArgs, res *ShutdownReply) error {
 	return nil
 }
 
-func (mr *MapReduce) StartRegistrationServer() {
+func (mr *MapReduce) startRegistrationServer() {
 	rpcs := rpc.NewServer()
 	rpcs.Register(mr)
 	os.Remove(mr.MasterAddress) // only needed for "unix"
@@ -138,7 +143,7 @@ func MapName(fileName string, MapJob int) string {
 }
 
 // Split bytes of input file into nMap splits, but split only on white space
-func (mr *MapReduce) Split(fileName string) {
+func (mr *MapReduce) split(fileName string) {
 	fmt.Printf("Split %s\n", fileName)
 	infile, err := os.Open(fileName)
 	if err != nil {
@@ -281,7 +286,7 @@ func DoReduce(job int, fileName string, nmap int,
 
 // Merge the results of the reduce jobs
 // XXX use merge sort
-func (mr *MapReduce) Merge() {
+func (mr *MapReduce) merge() {
 	DPrintf("Merge phase")
 	kvs := make(map[string]string)
 	for i := 0; i < mr.nReduce; i++ {
@@ -327,7 +332,7 @@ func RemoveFile(n string) {
 	}
 }
 
-func (mr *MapReduce) CleanupFiles() {
+func (mr *MapReduce) cleanupFiles() {
 	for i := 0; i < mr.nMap; i++ {
 		RemoveFile(MapName(mr.file, i))
 		for j := 0; j < mr.nReduce; j++ {
@@ -345,17 +350,17 @@ func RunSingle(nMap int, nReduce int, file string,
 	Map func(string) *list.List,
 	Reduce func(string, *list.List) string) {
 	mr := InitMapReduce(nMap, nReduce, file, "")
-	mr.Split(mr.file)
+	mr.split(mr.file)
 	for i := 0; i < nMap; i++ {
 		DoMap(i, mr.file, mr.nReduce, Map)
 	}
 	for i := 0; i < mr.nReduce; i++ {
 		DoReduce(i, mr.file, mr.nMap, Reduce)
 	}
-	mr.Merge()
+	mr.merge()
 }
 
-func (mr *MapReduce) CleanupRegistration() {
+func (mr *MapReduce) cleanupRegistration() {
 	args := &ShutdownArgs{}
 	var reply ShutdownReply
 	ok := call(mr.MasterAddress, "MapReduce.Shutdown", args, &reply)
@@ -366,13 +371,13 @@ func (mr *MapReduce) CleanupRegistration() {
 }
 
 // Run jobs in parallel, assuming a shared file system
-func (mr *MapReduce) Run() {
+func (mr *MapReduce) run() {
 	fmt.Printf("Run mapreduce job %s %s\n", mr.MasterAddress, mr.file)
 
-	mr.Split(mr.file)
-	mr.stats = mr.RunMaster()
-	mr.Merge()
-	mr.CleanupRegistration()
+	mr.split(mr.file)
+	mr.stats = mr.runMaster()
+	mr.merge()
+	mr.cleanupRegistration()
 
 	fmt.Printf("%s: MapReduce done\n", mr.MasterAddress)
 
