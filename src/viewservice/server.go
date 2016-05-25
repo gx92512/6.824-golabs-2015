@@ -18,6 +18,10 @@ type ViewServer struct {
 
 
 	// Your declarations here.
+    stime map[string]time.Time
+    cview View
+    nview View
+    acked bool
 }
 
 //
@@ -26,6 +30,42 @@ type ViewServer struct {
 func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 
 	// Your code here.
+    vs.stime[args.Me] = time.Now()
+    //fmt.Printf("%s  %s  %d  %d\n",  vs.cview.Primary, vs.cview.Backup, args.Viewnum, vs.cview.Viewnum)
+    //fmt.Println(vs.acked)
+    if vs.cview.Viewnum == 0{
+        vs.cview.Viewnum = 1
+        vs.cview.Primary = args.Me
+        vs.cview.Backup = ""
+        vs.acked = false
+        reply.View = vs.cview
+    }else{
+        if args.Me == vs.cview.Primary{
+            if args.Viewnum == vs.cview.Viewnum{
+                vs.acked = true
+            }else if args.Viewnum == 0{
+                vs.cview.Primary = vs.cview.Backup
+                vs.cview.Backup = ""
+                for k, _ := range vs.stime{
+                    if k != vs.cview.Primary && k != vs.cview.Backup{
+                        vs.cview.Backup = k
+                    }
+                }
+                vs.acked = false
+                vs.cview.Viewnum += 1
+            }
+            //vs.cview = vs.nview
+        }
+        if args.Me != vs.cview.Primary && vs.cview.Backup == ""{
+            if vs.acked{
+                vs.cview.Backup = args.Me
+                vs.cview.Primary = vs.cview.Primary
+                vs.cview.Viewnum = vs.cview.Viewnum + 1
+                vs.acked = false
+            }
+        }
+        reply.View = vs.cview
+    }
 
 	return nil
 }
@@ -36,6 +76,7 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
 
 	// Your code here.
+    reply.View = vs.cview
 
 	return nil
 }
@@ -49,6 +90,32 @@ func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
 func (vs *ViewServer) tick() {
 
 	// Your code here.
+    t := time.Now()
+    s := ""
+    for k, v := range vs.stime{
+        if t.Sub(v) > DeadPings * PingInterval{
+            if k == vs.cview.Primary && vs.acked{
+                //fmt.Printf("in tick: %s\n", vs.cview.Primary)
+                vs.cview.Primary = vs.cview.Backup
+                vs.cview.Backup = ""
+                vs.acked = false
+                //fmt.Printf("in tick: %s\n", vs.cview.Primary)
+                vs.cview.Viewnum += 1
+            }else if k == vs.cview.Backup && vs.acked{
+                vs.cview.Backup = ""
+                vs.acked = false
+                vs.cview.Viewnum += 1
+            }
+            delete(vs.stime, k)
+        }else{
+            if k != vs.cview.Primary && k != vs.cview.Backup{
+                s = k
+            }
+        }
+    }
+    if vs.cview.Backup == ""{
+        vs.cview.Backup = s
+    }
 }
 
 //
@@ -77,6 +144,11 @@ func StartServer(me string) *ViewServer {
 	vs := new(ViewServer)
 	vs.me = me
 	// Your vs.* initializations here.
+    vs.stime = make(map[string]time.Time)
+    vs.acked = false
+    vs.cview.Viewnum = 0
+    vs.cview.Primary = ""
+    vs.cview.Backup = ""
 
 	// tell net/rpc about our RPC server and handlers.
 	rpcs := rpc.NewServer()
