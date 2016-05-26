@@ -31,8 +31,8 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 
 	// Your code here.
     vs.stime[args.Me] = time.Now()
-    fmt.Printf("%s  %s  %d  %d\n",  vs.cview.Primary, vs.cview.Backup, args.Viewnum, vs.cview.Viewnum)
-    //fmt.Println(vs.acked)
+    fmt.Printf("viewsever %s  %s  %s  %d  %d\n",  vs.cview.Primary, vs.cview.Backup, args.Me, args.Viewnum, vs.cview.Viewnum)
+    fmt.Println(vs.acked)
     if vs.cview.Viewnum == 0{
         vs.cview.Viewnum = 1
         vs.cview.Primary = args.Me
@@ -92,17 +92,20 @@ func (vs *ViewServer) tick() {
 	// Your code here.
     t := time.Now()
     s := ""
+    flag := false
     for k, v := range vs.stime{
         if t.Sub(v) > DeadPings * PingInterval{
             if k == vs.cview.Primary && vs.acked{
                 //fmt.Printf("in tick: %s\n", vs.cview.Primary)
                 vs.cview.Primary = vs.cview.Backup
                 vs.cview.Backup = ""
+                flag = true
                 vs.acked = false
                 //fmt.Printf("in tick: %s\n", vs.cview.Primary)
                 vs.cview.Viewnum += 1
             }else if k == vs.cview.Backup && vs.acked{
                 vs.cview.Backup = ""
+                flag = true
                 vs.acked = false
                 vs.cview.Viewnum += 1
             }
@@ -113,7 +116,7 @@ func (vs *ViewServer) tick() {
             }
         }
     }
-    if vs.cview.Backup == ""{
+    if vs.cview.Backup == "" && flag{
         vs.cview.Backup = s
     }
 }

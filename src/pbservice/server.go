@@ -45,9 +45,12 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 
 	// Your code here.
+    fmt.Printf("server put %s  %s  %s\n", pb.me, pb.cview.Primary, pb.cview.Backup)
+    pb.mu.Lock()
     if args.Direct{
         if pb.cview.Primary != pb.me{
             reply.Err = ErrWrongServer
+            pb.mu.Unlock()
             return nil
         }else{
             if pb.cview.Backup != ""{
@@ -58,6 +61,7 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
                 fmt.Printf("call backup %s  %s  %s\n", pb.cview.Backup, args.Key, args.Value)
                 if reply2.Err == ErrWrongServer{
                     reply.Err = ErrWrongServer
+                    pb.mu.Unlock()
                     return nil
                 }
             }
@@ -65,10 +69,12 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
     }else{
         if pb.cview.Backup != pb.me{
             reply.Err = ErrWrongServer
+            pb.mu.Unlock()
             return nil
         }
     }
     if pb.data[args.Key].Id == args.Id{
+        pb.mu.Unlock()
         return nil
     }
     if args.Op == "Put"{
@@ -86,6 +92,7 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
     fmt.Printf("sever put %s  %s  %s\n", pb.me, args.Key, pb.data[args.Key].Data)
     //fmt.Println(pb.data)
     reply.Err = OK
+    pb.mu.Unlock()
 
 	return nil
 }
