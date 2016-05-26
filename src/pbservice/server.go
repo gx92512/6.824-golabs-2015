@@ -22,12 +22,21 @@ type PBServer struct {
 	me         string
 	vs         *viewservice.Clerk
 	// Your declarations here.
+    cview      viewservice.View
+    data       map[string]Value
 }
 
 
 func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 
 	// Your code here.
+    v,ok := pb.data[args.Key]
+    if ok{
+        reply.Value = v.Data
+        reply.Err = OK
+    }else{
+        reply.Err = ErrNoKey
+    }
 
 	return nil
 }
@@ -36,11 +45,66 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 
 	// Your code here.
-
+    if args.Direct{
+        if pb.cview.Primary != pb.me{
+            reply.Err = ErrWrongServer
+            return nil
+        }else{
+            if pb.cview.Backup != ""{
+                args2 := args
+                args2.Direct = false
+                var reply2 PutAppendReply
+                call(pb.cview.Backup, "PBServer.PutAppend", args2, &reply2)
+                fmt.Printf("call backup %s  %s  %s\n", pb.cview.Backup, args.Key, args.Value)
+                if reply2.Err == ErrWrongServer{
+                    reply.Err = ErrWrongServer
+                    return nil
+                }
+            }
+        }
+    }else{
+        if pb.cview.Backup != pb.me{
+            reply.Err = ErrWrongServer
+            return nil
+        }
+    }
+    if pb.data[args.Key].Id == args.Id{
+        return nil
+    }
+    if args.Op == "Put"{
+        d := Value{args.Value, args.Id}
+        pb.data[args.Key] = d
+        //pb.data[args.Key].Data = args.Value
+        //pb.data[args.Key].Id = args.Id
+    }else{
+        v := pb.data[args.Key].Data
+        d := Value{v + args.Value, args.Id}
+        pb.data[args.Key] = d
+        //pb.data[args.Key].Data = v + args.Value
+        //pb.data[args.Key].Id = args.Id
+    }
+    fmt.Printf("sever put %s  %s  %s\n", pb.me, args.Key, pb.data[args.Key].Data)
+    //fmt.Println(pb.data)
+    reply.Err = OK
 
 	return nil
 }
 
+func (pb *PBServer) Trans(args map[string]Value, reply *TransReply) error{
+    fmt.Println(args)
+    fmt.Printf("Trans %s %s \n", pb.cview.Backup, pb.me)
+    /*
+    if pb.cview.Backup == pb.me{
+        pb.data = args
+        reply.Err = OK
+    }else{
+        reply.Err = ErrWrongServer
+    }
+    */
+    pb.data = args
+    reply.Err = OK
+    return nil
+}
 
 //
 // ping the viewserver periodically.
@@ -51,6 +115,32 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 func (pb *PBServer) tick() {
 
 	// Your code here.
+    for pb.isdead() == false{
+        nview, _ := pb.vs.Ping(pb.cview.Viewnum)
+        if nview.Viewnum != pb.cview.Viewnum{
+            fmt.Printf("server tick %s %s %s\n", pb.cview.Primary, nview.Backup, pb.cview.Backup)
+            if pb.cview.Primary == pb.me && pb.cview.Backup != nview.Backup{
+                /*
+                for k,v := range pb.data{
+                    args := &PutAppendArgs{}
+                    args.Key = k
+                    args.Value = v
+                    args.Op = "Put"
+                    args.Direct = false
+                    var reply PutAppendReply
+                    call(nview.Backup, "PBServer.PutAppend", args, &reply)
+                    fmt.Printf("server tick %s %s\n", nview.Backup, reply.Err)
+                }
+                */
+                //args := &TransArgs{data: map[string]string{}}
+                //args.data = pb.data
+                var reply TransReply
+                call(nview.Backup, "PBServer.Trans", pb.data, &reply)
+            }
+            pb.cview = nview
+        }
+        time.Sleep(viewservice.PingInterval)
+    }
 }
 
 // tell the server to shut itself down.
@@ -84,6 +174,8 @@ func StartServer(vshost string, me string) *PBServer {
 	pb.me = me
 	pb.vs = viewservice.MakeClerk(me, vshost)
 	// Your pb.* initializations here.
+    pb.cview.Viewnum = 0
+    pb.data = make(map[string]Value)
 
 	rpcs := rpc.NewServer()
 	rpcs.Register(pb)

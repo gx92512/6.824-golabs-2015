@@ -201,6 +201,7 @@ func TestAtMostOnce(t *testing.T) {
 		time.Sleep(viewservice.PingInterval)
 	}
 
+	fmt.Printf("Test: at-most-once Append; unreliable ...\n")
 	// give p+b time to ack, initialize
 	time.Sleep(viewservice.PingInterval * viewservice.DeadPings)
 
@@ -359,6 +360,7 @@ func TestConcurrentSame(t *testing.T) {
 				k := strconv.Itoa(rr.Int() % nkeys)
 				v := strconv.Itoa(rr.Int())
 				ck.Put(k, v)
+                fmt.Printf("%s  %s\n", k, v)
 			}
 		}(xi)
 	}

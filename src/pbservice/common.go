@@ -16,6 +16,9 @@ type PutAppendArgs struct {
 
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+    Op    string
+    Direct bool
+    Id    int64
 }
 
 type PutAppendReply struct {
@@ -34,3 +37,16 @@ type GetReply struct {
 
 
 // Your RPC definitions here.
+
+type Value struct {
+    Data  string
+    Id    int64
+}
+
+type TransArgs struct {
+    data  map[string]string
+}
+
+type TransReply struct {
+    Err   Err
+}

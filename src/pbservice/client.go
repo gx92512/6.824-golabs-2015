@@ -6,11 +6,13 @@ import "fmt"
 
 import "crypto/rand"
 import "math/big"
+import "time"
 
 
 type Clerk struct {
 	vs *viewservice.Clerk
 	// Your declarations here
+    primary string
 }
 
 // this may come in handy.
@@ -25,6 +27,8 @@ func MakeClerk(vshost string, me string) *Clerk {
 	ck := new(Clerk)
 	ck.vs = viewservice.MakeClerk(me, vshost)
 	// Your ck.* initializations here
+    v,_ := ck.vs.Get()
+    ck.primary = v.Primary
 
 	return ck
 }
@@ -74,8 +78,21 @@ func call(srv string, rpcname string,
 func (ck *Clerk) Get(key string) string {
 
 	// Your code here.
-
-	return "???"
+    args := &GetArgs{}
+    args.Key = key
+    var reply GetReply
+    for {
+        ok := call(ck.primary, "PBServer.Get", args, &reply)
+        //fmt.Printf("client get %s  %s  ", ck.primary, reply.Err)
+        //fmt.Println(ok)
+        if ok && reply.Err != ErrWrongServer{
+            break
+        }
+        time.Sleep(viewservice.PingInterval)
+        v,_ := ck.vs.Get()
+        ck.primary = v.Primary
+    }
+	return reply.Value
 }
 
 //
@@ -84,6 +101,24 @@ func (ck *Clerk) Get(key string) string {
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	// Your code here.
+    args := &PutAppendArgs{}
+    args.Key = key
+    args.Value = value
+    args.Op = op
+    args.Direct = true
+    args.Id = nrand()
+    var reply PutAppendReply
+    for {
+        ok := call(ck.primary, "PBServer.PutAppend", args, &reply)
+        fmt.Printf("put append %s  %s   %s  %s\n", ck.primary, key, value, reply.Err)
+        if ok && reply.Err != ErrWrongServer{
+            break
+        }else{
+            time.Sleep(viewservice.PingInterval)
+            v,_ := ck.vs.Get()
+            ck.primary = v.Primary
+        }
+    }
 }
 
 //
