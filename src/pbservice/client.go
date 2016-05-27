@@ -13,6 +13,7 @@ type Clerk struct {
 	vs *viewservice.Clerk
 	// Your declarations here
     primary string
+    last int64
 }
 
 // this may come in handy.
@@ -107,10 +108,11 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
     args.Op = op
     args.Direct = true
     args.Id = nrand()
+    args.Lid = ck.last
     var reply PutAppendReply
     for {
         ok := call(ck.primary, "PBServer.PutAppend", args, &reply)
-        fmt.Printf("put append %s  %s   %s  %s\n", ck.primary, key, value, reply.Err)
+        //fmt.Printf("put append %s  %s   %s  %s\n", ck.primary, key, value, reply.Err)
         if ok && reply.Err != ErrWrongServer{
             break
         }else{
@@ -119,6 +121,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
             ck.primary = v.Primary
         }
     }
+    ck.last = args.Id
 }
 
 //

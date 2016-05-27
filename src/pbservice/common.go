@@ -19,6 +19,7 @@ type PutAppendArgs struct {
     Op    string
     Direct bool
     Id    int64
+    Lid   int64
 }
 
 type PutAppendReply struct {
@@ -44,7 +45,8 @@ type Value struct {
 }
 
 type TransArgs struct {
-    data  map[string]string
+    Data  map[string]Value
+    Done  map[int64]int
 }
 
 type TransReply struct {

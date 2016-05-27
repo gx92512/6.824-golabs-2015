@@ -31,8 +31,8 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 
 	// Your code here.
     vs.stime[args.Me] = time.Now()
-    fmt.Printf("viewsever %s  %s  %s  %d  %d\n",  vs.cview.Primary, vs.cview.Backup, args.Me, args.Viewnum, vs.cview.Viewnum)
-    fmt.Println(vs.acked)
+    //fmt.Printf("viewsever %s  %s  %s  %d  %d\n",  vs.cview.Primary, vs.cview.Backup, args.Me, args.Viewnum, vs.cview.Viewnum)
+    //fmt.Println(vs.acked)
     if vs.cview.Viewnum == 0{
         vs.cview.Viewnum = 1
         vs.cview.Primary = args.Me

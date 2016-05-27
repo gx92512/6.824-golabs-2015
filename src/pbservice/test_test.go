@@ -360,7 +360,6 @@ func TestConcurrentSame(t *testing.T) {
 				k := strconv.Itoa(rr.Int() % nkeys)
 				v := strconv.Itoa(rr.Int())
 				ck.Put(k, v)
-                fmt.Printf("%s  %s\n", k, v)
 			}
 		}(xi)
 	}
