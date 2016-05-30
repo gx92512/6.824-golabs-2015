@@ -44,6 +44,20 @@ const (
 	Forgotten      // decided but forgotten.
 )
 
+type info struct {
+    state      Fate
+    //my_n       string
+    n_h        num
+    n_a        num
+    v_a        interface{}
+}
+
+type num struct {
+    n          int
+    m          int
+}
+
+
 type Paxos struct {
 	mu         sync.Mutex
 	l          net.Listener
@@ -55,6 +69,8 @@ type Paxos struct {
 
 
 	// Your data here.
+    instances  map[int]*info
+    nums       map[int]*num
 }
 
 //
@@ -101,8 +117,223 @@ func call(srv string, name string, args interface{}, reply interface{}) bool {
 // call Status() to find out if/when agreement
 // is reached.
 //
+
+
+func (px *Paxos) Setn(seq int) {
+    px.mu.Lock()
+    _, ok1 := px.nums[seq]
+    if !ok1{
+        px.nums[seq] = &num{n : 1, m : px.me}
+    }
+    v, ok2 := px.instances[seq]
+    if ok2{
+        if px.nums[seq].n < v.n_h.n{
+            px.nums[seq].n = v.n_h.n
+        }
+    }
+    px.nums[seq].n += 1
+    px.mu.Unlock()
+}
+
+func (px *Paxos) Proposer(seq int, v interface{}) {
+    for {
+        px.Setn(seq)
+        //fmt.Printf("after Setn %d\n", px.nums[seq].n)
+        ok, value, max_a := px.Prepare(seq, v)
+        if ok{
+            //fmt.Println(11111)
+            ok2, max_a2 := px.Accept(seq, px.nums[seq], value)
+            if ok2{
+                //fmt.Println(22222)
+                px.Decide(seq, *px.nums[seq], value)
+            }else{
+                px.nums[seq].n = max_a2
+            }
+        }else{
+            px.nums[seq].n = max_a
+        }
+        state, _ := px.Status(seq)
+        //fmt.Println(state)
+        if state == Decided {
+            break
+        }
+    }
+}
+
+
+func (px *Paxos) Prepare(seq int, v interface{}) (bool, interface{}, int){
+    args := &Prepareargs{}
+    args.Instance = seq
+    //args.Pn = px.nums[seq]
+    args.Pn_n = px.nums[seq].n
+    args.Pn_m = px.nums[seq].m
+    sum := 0
+    max_a := px.nums[seq].n
+    max_n_a := &num{}
+    value := v
+    for index, peer := range px.peers{
+        //fmt.Printf("Prepare to %s\n", peer)
+        var reply Preparereply
+        if index == px.me{
+            px.Preparereq(args, &reply)
+        }else{
+            call(peer, "Paxos.Preparereq", args, &reply)
+        }
+        if reply.Err == OK{
+            sum += 1
+            //if Ismax(reply.N_a, max_n_a){
+            if reply.N_a_n > max_n_a.n || (reply.N_a_n == max_n_a.n && reply.N_a_m > max_n_a.m){
+                max_n_a.n = reply.N_a_n
+                max_n_a.m = reply.N_a_m
+                value = reply.V_a
+            }
+        }else if reply.Err == Reject{
+            if reply.N_h_n > max_a{
+                max_a = reply.N_h_n
+            }
+        }
+    }
+    return px.IsMajority(sum), value, max_a
+}
+
+func (px *Paxos) Accept(seq int, n *num, v interface{}) (bool, int) {
+    args := &Acceptargs{}
+    args.Instance = seq
+    args.N_a_n = n.n
+    args.N_a_m = n.m
+    args.Value = v
+    sum := 0
+    max_a := n.n
+    for index, peer := range px.peers{
+        var reply Acceptreply
+        if index == px.me{
+            px.Acceptreq(args, &reply)
+        }else{
+            call(peer, "Paxos.Acceptreq", args, &reply)
+        }
+        if reply.Err == OK{
+            sum += 1
+        }else if reply.Err == Reject{
+            if reply.N_h_n > max_a{
+                max_a = reply.N_h_n
+            }
+        }
+    }
+    return px.IsMajority(sum), max_a
+}
+
+func (px *Paxos) Decide(seq int, n num, v interface{}) {
+    px.mu.Lock()
+    px.instances[seq].state = Decided
+    px.instances[seq].n_a = n
+    px.instances[seq].v_a = v
+    px.instances[seq].n_h = n
+    px.mu.Unlock()
+    args := &Decideargs{}
+    args.Instance = seq
+    args.V_a = v
+    args.N_a_n = n.n
+    args.N_a_m = n.m
+    for index, peer := range px.peers{
+        if index != px.me{
+            var reply Decidereply
+            call(peer, "Paxos.Decidereq", args, &reply)
+        }
+    }
+}
+
+func (px *Paxos) IsMajority(sum int) bool {
+    return sum >= len(px.peers) / 2 + 1
+}
+
+func Ismax(n1 *num, n2 *num) bool {
+    if n1.n > n2.n || (n1.n == n2.n && n1.m > n2.m){
+        return true
+    }else{
+        return false
+    }
+}
+
+func Ismaxoreq(n1 *num, n2 *num) bool {
+    if n1.n > n2.n || (n1.n == n2.n && n1.m >= n2.m){
+        return true
+    }else{
+        return false
+    }
+}
+
+func (px *Paxos) Preparereq(args *Prepareargs, reply *Preparereply) error{
+    px.mu.Lock()
+    _, ok := px.instances[args.Instance]
+    if !ok {
+        px.instances[args.Instance] = &info{state:Pending}
+    }
+    //if Ismax(args.Pn, px.instances[args.Instance].n_h) {
+    if args.Pn_n > px.instances[args.Instance].n_h.n || (args.Pn_n == px.instances[args.Instance].n_h.n && args.Pn_m > px.instances[args.Instance].n_h.m){
+        px.instances[args.Instance].n_h.n = args.Pn_n
+        px.instances[args.Instance].n_h.m = args.Pn_m
+        reply.Err = OK
+        reply.N_a_m = px.instances[args.Instance].n_a.m
+        reply.N_a_n = px.instances[args.Instance].n_a.n
+        reply.V_a = px.instances[args.Instance].v_a
+    }else {
+        reply.Err = Reject
+        reply.N_h_m = px.instances[args.Instance].n_h.m
+        reply.N_h_n = px.instances[args.Instance].n_h.n
+    }
+    px.mu.Unlock()
+    return nil
+}
+
+func (px *Paxos) Acceptreq(args *Acceptargs, reply *Acceptreply) error {
+    px.mu.Lock()
+    _, ok := px.instances[args.Instance]
+    if !ok {
+        px.instances[args.Instance] = &info{state:Pending}
+    }
+    //if Ismaxoreq(args.N_a, px.instances[args.Instance].n_h) {
+    if args.N_a_n > px.instances[args.Instance].n_h.n || (args.N_a_n == px.instances[args.Instance].n_h.n && args.N_a_m >= px.instances[args.Instance].n_h.m){
+        reply.Err = OK
+        px.instances[args.Instance].n_h.n = args.N_a_n
+        px.instances[args.Instance].n_h.m = args.N_a_m
+        px.instances[args.Instance].n_a.n = args.N_a_n
+        px.instances[args.Instance].n_a.m = args.N_a_m
+        px.instances[args.Instance].v_a = args.Value
+    }else {
+        reply.Err = Reject
+        reply.N_h_m = px.instances[args.Instance].n_h.m
+        reply.N_h_n = px.instances[args.Instance].n_h.n
+    }
+    px.mu.Unlock()
+    return nil
+}
+
+func (px *Paxos) Decidereq(args *Decideargs, reply *Decidereply) error {
+    //fmt.Print("Decidereq %d\n", px.me)
+    px.mu.Lock()
+    _, ok := px.instances[args.Instance]
+    if !ok {
+        px.instances[args.Instance] = &info{state:Decided}
+    }
+    px.instances[args.Instance].state = Decided
+    px.instances[args.Instance].n_a.n = args.N_a_n
+    px.instances[args.Instance].n_a.m = args.N_a_m
+    px.instances[args.Instance].v_a = args.V_a
+    px.instances[args.Instance].n_h.n = args.N_a_n
+    px.instances[args.Instance].n_h.m = args.N_a_m
+    px.mu.Unlock()
+    return nil
+}
+
 func (px *Paxos) Start(seq int, v interface{}) {
 	// Your code here.
+    //fmt.Printf("start a paxos\n")
+    go func() {
+        if seq < px.Min(){
+            return
+        }
+        px.Proposer(seq, v)
+    }()
 }
 
 //
@@ -122,7 +353,15 @@ func (px *Paxos) Done(seq int) {
 //
 func (px *Paxos) Max() int {
 	// Your code here.
-	return 0
+    px.mu.Lock()
+    max := 0
+    for k, _ := range px.instances {
+        if k > max {
+            max = k
+        }
+    }
+    px.mu.Unlock()
+	return max
 }
 
 //
@@ -167,7 +406,16 @@ func (px *Paxos) Min() int {
 //
 func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	// Your code here.
-	return Pending, nil
+    px.mu.Lock()
+    instance, ok := px.instances[seq]
+    if !ok {
+        //fmt.Println(333333)
+        px.mu.Unlock()
+        return Pending, nil
+    }
+    px.mu.Unlock()
+    //fmt.Printf("Status %d  %d\n", px.me, instance.state)
+	return instance.state, instance.v_a
 }
 
 
@@ -216,6 +464,8 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 
 
 	// Your initialization code here.
+    px.instances = map[int]*info{}
+    px.nums = map[int]*num{}
 
 	if rpcs != nil {
 		// caller will create socket &c
