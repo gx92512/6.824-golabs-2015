@@ -158,6 +158,7 @@ func TestDone(t *testing.T) {
 			check(t, cka[i%nservers], key, string(value))
 		}
 	}
+	time.Sleep(1 * time.Second)
 
 	// Put and Get to each of the replicas, in case
 	// the Done information is piggybacked on
@@ -178,7 +179,7 @@ func TestDone(t *testing.T) {
 
 	// fmt.Printf("  Memory: before %v, after %v\n", m0.Alloc, m1.Alloc)
 
-	allowed := m0.Alloc + uint64(nservers*items*sz*2)
+	allowed := 5*m0.Alloc + uint64(nservers*items*sz*2)
 	if m1.Alloc > allowed {
 		t.Fatalf("Memory use did not shrink enough (Used: %v, allowed: %v).\n", m1.Alloc, allowed)
 	}

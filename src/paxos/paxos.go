@@ -155,7 +155,8 @@ func (px *Paxos) Proposer(seq int, v interface{}) {
         }
         state, _ := px.Status(seq)
         //fmt.Println(state)
-        if state == Decided {
+        if state == Decided || state == Forgotten{
+            delete(px.nums, seq)
             break
         }
     }
@@ -224,12 +225,18 @@ func (px *Paxos) Accept(seq int, n *num, v interface{}) (bool, int) {
 }
 
 func (px *Paxos) Decide(seq int, n num, v interface{}) {
+    /*
     px.mu.Lock()
+    _, ok := px.instances[seq]
+    if !ok{
+        fmt.Printf("in Decide %d, %d\n", seq, px.me)
+    }
     px.instances[seq].state = Decided
     px.instances[seq].n_a = n
     px.instances[seq].v_a = v
     px.instances[seq].n_h = n
     px.mu.Unlock()
+    */
     args := &Decideargs{}
     args.Instance = seq
     args.V_a = v
@@ -238,9 +245,11 @@ func (px *Paxos) Decide(seq int, n num, v interface{}) {
     args.Me = px.me
     args.Done = px.done[px.me]
     for index, peer := range px.peers{
+        var reply Decidereply
         if index != px.me{
-            var reply Decidereply
             call(peer, "Paxos.Decidereq", args, &reply)
+        }else{
+            px.Decidereq(args, &reply)
         }
     }
 }
@@ -269,6 +278,7 @@ func (px *Paxos) Preparereq(args *Prepareargs, reply *Preparereply) error{
     px.mu.Lock()
     _, ok := px.instances[args.Instance]
     if !ok {
+        //fmt.Printf("create instance %d %d %d in Preparereq\n", args.Instance, px.me, args.Pn_n)
         px.instances[args.Instance] = &info{state:Pending}
     }
     //if Ismax(args.Pn, px.instances[args.Instance].n_h) {
@@ -293,6 +303,7 @@ func (px *Paxos) Acceptreq(args *Acceptargs, reply *Acceptreply) error {
     _, ok := px.instances[args.Instance]
     if !ok {
         px.instances[args.Instance] = &info{state:Pending}
+        //fmt.Printf("create instance %d in acceptreq\n", args.Instance)
     }
     //if Ismaxoreq(args.N_a, px.instances[args.Instance].n_h) {
     if args.N_a_n > px.instances[args.Instance].n_h.n || (args.N_a_n == px.instances[args.Instance].n_h.n && args.N_a_m >= px.instances[args.Instance].n_h.m){
@@ -317,6 +328,7 @@ func (px *Paxos) Decidereq(args *Decideargs, reply *Decidereply) error {
     _, ok := px.instances[args.Instance]
     if !ok {
         px.instances[args.Instance] = &info{state:Decided}
+        //fmt.Printf("create instance %d in decidereq\n", args.Instance)
     }
     px.instances[args.Instance].state = Decided
     px.instances[args.Instance].n_a.n = args.N_a_n
@@ -331,12 +343,30 @@ func (px *Paxos) Decidereq(args *Decideargs, reply *Decidereply) error {
 
 func (px *Paxos) Start(seq int, v interface{}) {
 	// Your code here.
-    //fmt.Printf("start a paxos\n")
+    //fmt.Printf("start a paxos %d, %d, %d\n", px.me, seq, px.Min())
     go func() {
         if seq < px.Min(){
             return
         }
         px.Proposer(seq, v)
+        px.mu.Lock()
+        min := px.done[px.me]
+        for _,v := range px.done{
+            if v < min{
+                min = v
+            }
+        }
+        for k,v := range px.instances{
+            if k > min{
+                continue
+            }
+            if v.state != Decided{
+                continue
+            }
+            delete(px.instances, k)
+            //fmt.Printf("Delete %d, %d\n", k, px.me)
+        }
+        px.mu.Unlock()
     }()
 }
 
@@ -418,7 +448,8 @@ func (px *Paxos) Min() int {
             continue
         }
         delete(px.instances, k)
-        delete(px.instances, k)
+        //fmt.Printf("Delete %d, %d\n", k, px.me)
+        //delete(px.nums, k)
     }
     px.mu.Unlock()
 	return min + 1

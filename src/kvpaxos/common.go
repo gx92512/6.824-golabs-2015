@@ -5,6 +5,12 @@ const (
 	ErrNoKey = "ErrNoKey"
 )
 
+const (
+    GET = "Get"
+    PUT = "Put"
+    APPEND = "Append"
+)
+
 type Err string
 
 // Put or Append
@@ -16,6 +22,7 @@ type PutAppendArgs struct {
 	// You'll have to add definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+    Cseq  int64
 }
 
 type PutAppendReply struct {
@@ -25,6 +32,7 @@ type PutAppendReply struct {
 type GetArgs struct {
 	Key string
 	// You'll have to add definitions here.
+    Cseq int64
 }
 
 type GetReply struct {

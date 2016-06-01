@@ -5,6 +5,7 @@ import "fmt"
 import "net/rpc"
 import "log"
 import "paxos"
+import "time"
 import "sync"
 import "sync/atomic"
 import "os"
@@ -27,6 +28,10 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+    Op string
+    Key string
+    Value string
+    Cseq int64
 }
 
 type KVPaxos struct {
@@ -38,16 +43,88 @@ type KVPaxos struct {
 	px         *paxos.Paxos
 
 	// Your definitions here.
+    logs       []Op
+    done       map[int64]bool
+    lastSeq    int
 }
 
 
+func (kv *KVPaxos) waitPaxos(seq int) Op{
+    to := 10 * time.Millisecond
+    for {
+        status, v := kv.px.Status(seq)
+        if status == paxos.Decided{
+            value := v.(Op)
+            return value
+        }
+        time.Sleep(to)
+        if to < 10 * time.Second {
+            to*= 2
+        }
+    }
+}
+
+
+func (kv *KVPaxos) Process(logete Op) {
+    finish := false
+    var value Op
+    for !finish {
+        seq := kv.lastSeq
+        status, val := kv.px.Status(seq)
+        if status == paxos.Decided{
+            value = val.(Op)
+        }else {
+            //fmt.Printf("in Process %d\n", seq)
+            kv.px.Start(seq, logete)
+            value = kv.waitPaxos(seq)
+        }
+        finish = logete.Cseq == value.Cseq
+        kv.logs = append(kv.logs, value)
+        kv.done[value.Cseq] = true
+        kv.px.Done(kv.lastSeq)
+        //fmt.Printf("call Done %d  %d\n", kv.lastSeq, kv.me)
+        kv.lastSeq += 1
+    }
+}
+
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	// Your code here.
+    kv.mu.Lock()
+    _,ok := kv.done[args.Cseq]
+    if !ok{
+        logete := Op{Op: GET, Key: args.Key, Cseq: args.Cseq}
+        kv.Process(logete)
+    }
+    reply.Err = ErrNoKey
+    //fmt.Printf("get k: %s\n", args.Key)
+    for _,v := range kv.logs{
+        //fmt.Printf("get log %s, %s, %s\n", v.Key, v.Op, v.Value)
+        if v.Key == args.Key && v.Op != GET{
+            reply.Err = OK
+            if v.Op == PUT {
+                reply.Value = v.Value
+            }else {
+                reply.Value += v.Value
+            }
+            //fmt.Printf("get v: %s\n", reply.Value)
+        }
+    }
+    //fmt.Printf("get %d %s %s\n", kv.me, args.Key, reply.Value)
+    kv.mu.Unlock()
 	return nil
 }
 
 func (kv *KVPaxos) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// Your code here.
+    kv.mu.Lock()
+    _,ok := kv.done[args.Cseq]
+    if ok{
+        reply.Err = OK
+    }else{
+        logete := Op{Op: args.Op, Key: args.Key, Value: args.Value, Cseq: args.Cseq}
+        kv.Process(logete)
+    }
+    kv.mu.Unlock()
 
 	return nil
 }
@@ -94,6 +171,9 @@ func StartServer(servers []string, me int) *KVPaxos {
 	kv.me = me
 
 	// Your initialization code here.
+    kv.logs = []Op{}
+    kv.done = make(map[int64]bool)
+    kv.lastSeq = 1
 
 	rpcs := rpc.NewServer()
 	rpcs.Register(kv)
