@@ -71,6 +71,7 @@ type Paxos struct {
 	// Your data here.
     instances  map[int]*info
     nums       map[int]*num
+    done       []int
 }
 
 //
@@ -234,6 +235,8 @@ func (px *Paxos) Decide(seq int, n num, v interface{}) {
     args.V_a = v
     args.N_a_n = n.n
     args.N_a_m = n.m
+    args.Me = px.me
+    args.Done = px.done[px.me]
     for index, peer := range px.peers{
         if index != px.me{
             var reply Decidereply
@@ -321,6 +324,7 @@ func (px *Paxos) Decidereq(args *Decideargs, reply *Decidereply) error {
     px.instances[args.Instance].v_a = args.V_a
     px.instances[args.Instance].n_h.n = args.N_a_n
     px.instances[args.Instance].n_h.m = args.N_a_m
+    px.done[args.Me] = args.Done
     px.mu.Unlock()
     return nil
 }
@@ -344,6 +348,11 @@ func (px *Paxos) Start(seq int, v interface{}) {
 //
 func (px *Paxos) Done(seq int) {
 	// Your code here.
+    px.mu.Lock()
+    if seq > px.done[px.me]{
+        px.done[px.me] = seq
+    }
+    px.mu.Unlock()
 }
 
 //
@@ -394,7 +403,25 @@ func (px *Paxos) Max() int {
 //
 func (px *Paxos) Min() int {
 	// You code here.
-	return 0
+    px.mu.Lock()
+    min := px.done[px.me]
+    for _,v := range px.done{
+        if v < min{
+            min = v
+        }
+    }
+    for k,v := range px.instances{
+        if k > min{
+            continue
+        }
+        if v.state != Decided{
+            continue
+        }
+        delete(px.instances, k)
+        delete(px.instances, k)
+    }
+    px.mu.Unlock()
+	return min + 1
 }
 
 //
@@ -406,6 +433,9 @@ func (px *Paxos) Min() int {
 //
 func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	// Your code here.
+    if seq < px.Min(){
+        return Forgotten, nil
+    }
     px.mu.Lock()
     instance, ok := px.instances[seq]
     if !ok {
@@ -466,6 +496,10 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 	// Your initialization code here.
     px.instances = map[int]*info{}
     px.nums = map[int]*num{}
+    px.done = make([]int, len(px.peers))
+    for i,_ := range px.done{
+        px.done[i] = -1
+    }
 
 	if rpcs != nil {
 		// caller will create socket &c
