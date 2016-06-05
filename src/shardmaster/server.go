@@ -23,6 +23,7 @@ type ShardMaster struct {
 	px         *paxos.Paxos
 
 	configs []Config // indexed by config num
+    lastseq int
 }
 
 
@@ -191,7 +192,7 @@ func (sm *ShardMaster) Doquery(value Op) {
     for k,v := range lconf.Groups {
         nconf.Groups[k] = v
     }
-    sm.configs = append(sm.configs, nconf)
+    //sm.configs = append(sm.configs, nconf)
 }
 
 func (sm *ShardMaster) Insert(value Op) {
@@ -211,7 +212,8 @@ func (sm *ShardMaster) Process(logete Op) {
     finish := false
     var value Op
     for !finish {
-        seq := len(sm.configs)
+        //seq := len(sm.configs)
+        seq := sm.lastseq
         //fmt.Printf("in process %d\n", seq)
         status, val := sm.px.Status(seq)
         if status != paxos.Decided{
@@ -223,6 +225,7 @@ func (sm *ShardMaster) Process(logete Op) {
         finish = value.Me == sm.me
         sm.Insert(value)
         sm.px.Done(seq)
+        sm.lastseq += 1
     }
 }
 

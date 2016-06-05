@@ -25,6 +25,8 @@ type PutAppendArgs struct {
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
 
+    Shard int
+    Cseq  int64
 }
 
 type PutAppendReply struct {

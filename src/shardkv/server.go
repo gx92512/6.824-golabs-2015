@@ -27,6 +27,11 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 
 type Op struct {
 	// Your definitions here.
+    Key string
+    Value string
+    Op string
+    Config Config
+    Cseq int64
 }
 
 
@@ -42,8 +47,102 @@ type ShardKV struct {
 	gid int64 // my replica group ID
 
 	// Your definitions here.
+    logs       []Op
+    done       map[int64]bool
+    data       map[string]string
+    config     shardmaster.Config
 }
 
+func (kv *ShardKV) waitPaxos(seq int) Op{
+    to := 10 * time.Millisecond
+    for {
+        status, v := kv.px.Status(seq)
+        if status == paxos.Decided{
+            value := v.(Op)
+            return value
+        }
+        time.Sleep(to)
+        if to < 10 * time.Second {
+            to*= 2
+        }
+    }
+}
+
+func (kv *ShardKV) SendShard(servers []string, config Config, shard int, data map[string]string){
+    for {
+        for _,server := range servers {
+            args := &ShardArgs{Shard: shard, Data: data, Config: config}
+            var reply ShardReply
+            ok := call(server, "ShardKV.ReceiveShard", args, &reply)
+            if ok && reply.Err == OK{
+                return
+            }
+        }
+        time.Sleep(100 * time.Millisecond)
+    }
+}
+
+func (kv *ShardKV) ReceiveShard(args *ShardArgs, reply *ShardReply){
+    kv.mu.Lock()
+    logete := Op{Op: "ReceiveShard", Data: args.Data, Shard: args.Shard, Config: args.Config}
+    kv.Process(logete)
+    kv.mu.Unlock()
+}
+
+func (kv *ShardKV) RecvData(data map[string][string]){
+    for k,v := range data{
+        kv.data[k] = v
+    }
+}
+
+func (kv *ShardKV) Insert(value Op) {
+    switch value.Op {
+    case "Put":
+        kv.data[value.Key] = value.Value
+    case "Append":
+        kv.data[value.Key] += value.Value
+    case "Reconfig":
+        kv.needShard = make(map[int]bool)
+        for shard := 0; shard < NShards; shard++{
+            if kv.config.Shards[shard] == kv.gid && value.Config.Shards[shard] != kv.gid {
+                data := make(map[string][string])
+                for k,v := range kv.data{
+                    if key2shard[k] == shard{
+                        data[k] = v
+                    }
+                }
+                kv.SendShard(value.Config.Groups[value.Config.Shards[shard]], value.Config, shard, data)
+            }else if kv.config.Shards[shard] != kv.gid && value.Config.Shards[shard] == kv.gid {
+                kv.needShard = true
+            }
+        }
+        kv.config = value.Config
+    case "ReceiveShard":
+        kv.RecvData(value.Data)
+        kv.needShard = false
+    }
+}
+
+func (kv *ShardKV) Process(logete Op) {
+    finish := false
+    var value Op
+    for !finish {
+        seq := kv.lastSeq
+        status, val := kv.px.Status(seq)
+        if status == paxos.Decided{
+            value = val.(Op)
+        }else {
+            //fmt.Printf("in Process %d\n", seq)
+            kv.px.Start(seq, logete)
+            value = kv.waitPaxos(seq)
+        }
+        finish = logete.Cseq == value.Cseq
+        kv.Insert(value)
+        kv.px.Done(kv.lastSeq)
+        //fmt.Printf("call Done %d  %d\n", kv.lastSeq, kv.me)
+        kv.lastSeq += 1
+    }
+}
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 	// Your code here.
@@ -53,6 +152,19 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
 // RPC handler for client Put and Append requests
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 	// Your code here.
+    kv.mu.Lock()
+    _,ok := kv.done[args.Cseq]
+    if ok {
+        reply.Err = OK
+    } else {
+        if kv.config.Shards[args.Shard]{
+            reply.Err = ErrWrongGroup
+        }else{
+            logete := Op{Key: args.Key, Value: args.Value, Op: args.Op, Cseq: args.Cseq}
+            kv.Process(logete)
+        }
+    }
+    kv.mu.Unlock()
 	return nil
 }
 
@@ -61,6 +173,13 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error {
 // if so, re-configure.
 //
 func (kv *ShardKV) tick() {
+    kv.mu.Lock()
+    nconfig := kv.sm.Query(kv.config.Num + 1)
+    if nconfig.Num == kv.config.Num + 1 {
+        logete := Op{Op: "Reconfig", Config: nconfig}
+        kv.Process(logete)
+    }
+    kv.mu.Unlock()
 }
 
 // tell the server to shut itself down.
