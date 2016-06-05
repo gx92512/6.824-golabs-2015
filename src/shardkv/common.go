@@ -13,6 +13,7 @@ const (
 	OK            = "OK"
 	ErrNoKey      = "ErrNoKey"
 	ErrWrongGroup = "ErrWrongGroup"
+    ErrNotReady   = "ErrNotReady"
 )
 
 type Err string
@@ -25,8 +26,7 @@ type PutAppendArgs struct {
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
 
-    Shard int
-    Cseq  int64
+    UID int64
 }
 
 type PutAppendReply struct {
@@ -36,6 +36,7 @@ type PutAppendReply struct {
 type GetArgs struct {
 	Key string
 	// You'll have to add definitions here.
+    UID int64
 }
 
 type GetReply struct {
@@ -43,3 +44,14 @@ type GetReply struct {
 	Value string
 }
 
+type ReceiveArgs struct {
+    UID_CFG string  // UID of reconfig action
+    ShardNum int    // Shard Id
+    Num int         // configuration number s.t. reconfig Num --> Num+1
+    Shard map[string]string     // key/value in this shard
+    RequestCache map[int64]ReqR // request cache for this shard
+}
+
+type ReceiveReply struct {
+    Err Err
+}
